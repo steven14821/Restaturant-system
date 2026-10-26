@@ -28,7 +28,7 @@ variables:
   # una variable webAppName con el hostname (con sufijo) y las variables de la
   # UI sobrescriben el YAML, apuntando a un recurso que no existe.
   appServiceName: 'restaurant-system-app'
-  # Solo se usan si el task no devuelve AppServiceApplicationUrl.
+  # URLs de la Web App usadas por el health check del deploy.
   appServiceUrl: 'https://restaurant-system-app-b5gpfzhfb7bsedby.westus3-01.azurewebsites.net'
   appServiceUrlAlt: 'https://restaurant-system-app-b5gpfzhfb7bsedby.azurewebsites.net'
 
@@ -140,70 +140,73 @@ stages:
                 - download: current
                   artifact: 'drop'
 
-                # ZipDeploy en App Service Windows NO limpia wwwroot: deja
-                # node_modules/.next viejos mezclados con los nuevos y la app
-                # arranca con binarios obsoletos (500 de iisnode). Borramos
-                # wwwroot via API de Kudu usando las credenciales de publicacion
-                # de la propia Web App (no hace falta la service connection ARM).
+                # ZipDeploy en App Service Windows no borra los archivos que no
+                # están en el paquete: node_modules/.next viejos se mezclan con
+                # los nuevos y la app arranca con binarios obsoletos (500 de
+                # iisnode). Antes se borraba wwwroot ANTES del deploy, pero si
+                # el deploy fallaba el sitio quedaba completamente caído.
+                #
+                # Ahora se empaqueta y se sube con --clean true: Kudu borra lo
+                # que sobra como parte del mismo despliegue, sin ventana en la
+                # que wwwroot esté vacío.
                 - task: AzureCLI@2
-                  displayName: 'Limpiar wwwroot via Kudu'
+                  name: deployWebApp
+                  displayName: 'Deploy a App Service (Windows, limpio y atómico)'
                   inputs:
                     azureSubscription: $(azureServiceConnection)
                     scriptType: 'bash'
                     scriptLocation: 'inlineScript'
                     inlineScript: |
-                      set -e
-                      USER=$(az webapp deployment list-publishing-credentials \
-                        --name $(appServiceName) \
+                      set -euo pipefail
+                      cd "$(Pipeline.Workspace)/drop"
+                      rm -f /tmp/app.zip
+                      zip -qr /tmp/app.zip . -x '*.git*'
+                      ls -lh /tmp/app.zip
+
+                      # --clean true elimina en wwwroot lo que no venga en el zip
+                      # --restart true reinicia iisnode al terminar
+                      az webapp deploy \
                         --resource-group rg-restaurant-system \
-                        --query publishingUserName -o tsv)
-                      PASS=$(az webapp deployment list-publishing-credentials \
                         --name $(appServiceName) \
-                        --resource-group rg-restaurant-system \
-                        --query publishingPassword -o tsv)
-                      KUDU="https://$(appServiceName).scm.azurewebsites.net/api/vfs/site/wwwroot"
+                        --src-path /tmp/app.zip \
+                        --type zip \
+                        --clean true \
+                        --restart true
 
-                      echo "Limpiando wwwroot (node_modules, .next) via Kudu..."
-                      for ITEM in node_modules .next; do
-                        curl -sS -u "$USER:$PASS" -X DELETE "$KUDU/$ITEM" -o /dev/null -w "  delete $ITEM -> %{http_code}\n" || true
-                      done
-
-                      echo "Contenido restante en wwwroot:"
-                      curl -sS -u "$USER:$PASS" "$KUDU/" | head -c 2000 || true
-
-                - task: AzureWebApp@1
-                  name: deployWebApp
-                  displayName: 'Deploy a App Service (Windows)'
-                  inputs:
-                    azureSubscription: $(azureServiceConnection)
-                    # La Web App está en Windows: en Windows no existen
-                    # runtimeStack ni startupCommand; el arranque lo definen
-                    # web.config + server.js (iisnode).
-                    appType: 'webApp'
-                    appName: $(appServiceName)
-                    package: '$(Pipeline.Workspace)/drop'
-                    deploymentMethod: 'zipDeploy'
-
+                # /menu es una página estática: devuelve 200 aunque PostgreSQL
+                # esté caído (así se daba el deploy por bueno con la carta
+                # vacía). /api/health consulta la BD de verdad:
+                #   200 -> app y base de datos OK
+                #   503 -> app arriba pero base de datos caída (o sin configurar)
                 - script: |
-                    APP_URL="$(deployWebApp.AppServiceApplicationUrl)"
-                    if [ -z "$APP_URL" ]; then
-                      APP_URL="$(appServiceUrl)"
-                    fi
-                    APP_URL="${APP_URL%/}"
+                    APP_URL="$(appServiceUrl)"
+                    APP_URL_ALT="$(appServiceUrlAlt)"
 
-                    # La app acaba de reiniciarse y next start compila la ruta
-                    # en la primera peticion: damos margen generoso.
+                    if [ -z "$APP_URL" ] && [ -z "$APP_URL_ALT" ]; then
+                      echo "##vso[task.logissue type=error]No hay appServiceUrl ni appServiceUrlAlt definidas en el pipeline."
+                      exit 1
+                    fi
+
+                    # La app acaba de reiniciarse: damos margen generoso.
                     for INTENTO in $(seq 1 15); do
-                      for URL in "$APP_URL" "$(appServiceUrlAlt)"; do
+                      for URL in "$APP_URL" "$APP_URL_ALT"; do
                         if [ -z "$URL" ]; then
                           continue
                         fi
                         URL="${URL%/}"
-                        CODE=$(curl -s -o /dev/null -m 30 -w "%{http_code}" "$URL/menu" || true)
-                        echo "Intento $INTENTO -> $URL/menu : $CODE"
+                        CODE=$(curl -s -o /tmp/health.json -m 30 -w "%{http_code}" "$URL/api/health" || true)
+                        BODY=$(tr -d '\n' < /tmp/health.json 2>/dev/null | cut -c1-300)
+                        echo "Intento $INTENTO -> $URL/api/health : $CODE $BODY"
                         case "$CODE" in
-                          200|301|302|307|308)
-                            echo "##vso[task.complete result=Succeeded]Deploy verificado ($URL/menu => $CODE)"
+                          200)
+                            echo "##vso[task.complete result=Succeeded]Deploy verificado: app y base de datos OK ($URL/api/health => 200)"
+                            exit 0
+                            ;;
+                          503)
+                            # La app está bien; el problema es la BD y no se
+                            # arregla esperando. Dejamos pasar el pipeline pero
+                            # avisamos con el motivo exacto.
+                            echo "##vso[task.logissue type=warning]La app responde pero la base de datos no: $BODY"
                             exit 0
                             ;;
                         esac
@@ -212,7 +215,7 @@ stages:
                     done
 
                     # No marcamos el pipeline como fallido: el deploy ya se hizo
-                    # y la app puede estar aun en warm-up. Revisar la URL a mano.
-                    echo "##vso[task.logissue type=warning]La app no responde 200/30x en /menu tras ~4 min; el deploy se aplico, verifica la URL manualmente"
-                  displayName: 'Verificar health check'
+                    # y la app puede estar aun en warm-up. Revisar a mano.
+                    echo "##vso[task.logissue type=warning]La app no responde en /api/health tras ~4 min; revisa los logs de iisnode en D:\\home\\LogFiles\\Application\\iisnode"
+                  displayName: 'Verificar health check (app + base de datos)'
                   continueOnError: true

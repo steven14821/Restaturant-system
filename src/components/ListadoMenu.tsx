@@ -31,6 +31,8 @@ export default function ListadoMenu({ numeroMesa }: Props) {
   const [mensajeIA, setMensajeIA] = useState('');
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
+  // Cambiar este contador vuelve a ejecutar la carga (botón "Reintentar").
+  const [intento, setIntento] = useState(0);
   const [mesa, setMesaInfo] = useState<Mesa | null>(null);
   const [mesaError, setMesaError] = useState('');
   const [mensaje, setMensaje] = useState('');
@@ -39,6 +41,9 @@ export default function ListadoMenu({ numeroMesa }: Props) {
   const mesaIvalida = numeroMesa != null && Number.isInteger(numeroMesa) && numeroMesa > 0;
 
   useEffect(() => {
+    setCargando(true);
+    setError('');
+
     const recoP = recommendationService
       .obtener(4)
       .then((r) => {
@@ -54,7 +59,7 @@ export default function ListadoMenu({ numeroMesa }: Props) {
       })
       .catch((err) => setError((err as Error).message))
       .finally(() => setCargando(false));
-  }, []);
+  }, [intento]);
 
   useEffect(() => {
     if (!mesaIvalida) return;
@@ -125,18 +130,27 @@ export default function ListadoMenu({ numeroMesa }: Props) {
         </div>
       )}
 
-      {error && (
-        <div className="rv-card-panel d-flex align-items-center gap-2 p-3 mb-4" style={{ background: 'var(--rv-crema)', borderLeft: '4px solid var(--rv-pomodoro)' }}>
-          <i className="bi bi-exclamation-triangle" style={{ color: 'var(--rv-pomodoro)' }}></i> {error}
-        </div>
-      )}
-
       {cargando ? (
         <div className="text-center py-5">
           <div className="spinner-border text-warning" role="status" />
           <p className="rv-mano rv-mano-oliva mt-3" style={{ fontSize: '1.3rem' }}>
             preparando la carta...
           </p>
+        </div>
+      ) : error ? (
+        <div className="rv-listado-platos" style={{ maxWidth: 520, margin: '2rem auto' }}>
+          <div className="rv-listado-cuerpo" style={{ textAlign: 'center', padding: '2.5rem 1.5rem' }}>
+            <i className="bi bi-exclamation-triangle" style={{ fontSize: '2.2rem', color: 'var(--rv-pomodoro)' }}></i>
+            <h3 style={{ fontFamily: 'var(--font-display)', marginTop: '0.8rem' }}>No pudimos cargar la carta</h3>
+            <p style={{ fontSize: '0.95rem', color: 'var(--rv-tinta-2)', margin: '0.5rem 0 0' }}>{error}</p>
+            <button
+              type="button"
+              className="rv-btn rv-btn-pomodoro mt-3"
+              onClick={() => setIntento((n) => n + 1)}
+            >
+              Reintentar
+            </button>
+          </div>
         </div>
       ) : platillos.length === 0 ? (
         <div className="rv-listado-platos" style={{ maxWidth: 480, margin: '2rem auto' }}>
