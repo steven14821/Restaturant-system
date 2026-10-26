@@ -8,12 +8,16 @@ export async function GET(req: NextRequest) {
   const soloDisponibles = searchParams.get('disponibles') !== 'false';
   const categoriaId = searchParams.get('categoria_id');
 
-  const platillos = await listarPlatillos({
-    soloDisponibles,
-    categoriaId: categoriaId ? Number(categoriaId) : undefined,
-  });
-
-  return NextResponse.json({ platillos });
+  try {
+    const platillos = await listarPlatillos({
+      soloDisponibles,
+      categoriaId: categoriaId ? Number(categoriaId) : undefined,
+    });
+    return NextResponse.json({ platillos });
+  } catch (err) {
+    console.error('[api/menu] error:', err);
+    return NextResponse.json({ error: mensajeErrorBaseDatos(err) }, { status: 500 });
+  }
 }
 
 /** RF14 — Crear platillo (solo administrador) */
@@ -31,4 +35,15 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 400 });
   }
+}
+
+function mensajeErrorBaseDatos(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes('Falta DATABASE_URL')) {
+    return 'No hay conexión configurada a la base de datos (DATABASE_URL).';
+  }
+  if (msg.includes('tenant/user') || msg.includes('ENOTFOUND')) {
+    return 'No se pudo conectar a la base de datos: el proyecto de Supabase no existe o está pausado.';
+  }
+  return `No se pudo cargar el menú: ${msg}`;
 }
