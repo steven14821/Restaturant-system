@@ -10,7 +10,7 @@ import GuardiaConfirmacion from '@/components/GuardiaConfirmacion';
 import FooterEnlaces from '@/components/FooterEnlaces';
 import BootstrapClient from '@/components/BootstrapClient';
 
-const garamond = Cormorant_Garamond({
+const _garamond = Cormorant_Garamond({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
   style: ['normal', 'italic'],
@@ -18,14 +18,14 @@ const garamond = Cormorant_Garamond({
   display: 'swap',
 });
 
-const caveat = Caveat({
+const _caveat = Caveat({
   subsets: ['latin'],
   weight: ['400', '600', '700'],
   variable: '--font-caveat',
   display: 'swap',
 });
 
-const workSans = Work_Sans({
+const _workSans = Work_Sans({
   subsets: ['latin'],
   weight: ['300', '400', '500', '600'],
   variable: '--font-work',
@@ -40,7 +40,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" className={`${garamond.variable} ${caveat.variable} ${workSans.variable}`}>
+    <html lang="es" className={`
+      ${_garamond.variable}
+      ${_caveat.variable}
+      ${_workSans.variable}
+    `}>
       <body>
         <AuthProvider>
           <CartProvider>

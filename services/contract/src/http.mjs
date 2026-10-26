@@ -1,20 +1,6 @@
-export type ServiceAuth = { token: string; tipo: 'bearer' };
-
-export interface HttpClientOptions {
-  baseUrl: string;
-  auth?: ServiceAuth;
-  beforeRequest?: (req: Request) => Request;
-}
-
-export interface FetchResponse<T> {
-  ok: boolean;
-  status: number;
-  body: T | null;
-}
-
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
-export async function jsonFetch<T>(input: RequestInfo | URL, init?: RequestInit): Promise<FetchResponse<T>> {
+export async function jsonFetch(input, init) {
   let request = new Request(input, init);
 
   if (init?.body && !(request.headers.get('Content-Type') || '').includes('json')) {
@@ -24,12 +10,12 @@ export async function jsonFetch<T>(input: RequestInfo | URL, init?: RequestInit)
   const response = await fetch(request);
   const ok = response.ok;
 
-  let body: T | null = null;
+  let body = null;
   if (response.status !== 204) {
     try {
-      body = (await response.json()) as T;
+      body = await response.json();
     } catch {
-      body = null as unknown as T;
+      body = null;
     }
   }
 
@@ -37,13 +23,13 @@ export async function jsonFetch<T>(input: RequestInfo | URL, init?: RequestInit)
 }
 
 export class ServiceClient {
-  constructor(
-    public readonly baseUrl: string,
-    public readonly auth?: ServiceAuth,
-    public readonly beforeRequest?: (req: Request) => Request,
-  ) {}
+  constructor(baseUrl, auth, beforeRequest) {
+    this.baseUrl = baseUrl;
+    this.auth = auth;
+    this.beforeRequest = beforeRequest;
+  }
 
-  async get<T>(path: string, params?: Record<string, string | number | boolean | undefined>): Promise<FetchResponse<T>> {
+  async get(path, params) {
     const url = new URL(`${this.baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`);
     if (params) {
       for (const [k, v] of Object.entries(params)) {
@@ -52,11 +38,11 @@ export class ServiceClient {
       }
     }
     const request = this.build(url, { method: 'GET' });
-    return jsonFetch<T>(request);
+    return jsonFetch(request);
   }
 
-  async post<T, B = unknown>(path: string, body?: B): Promise<FetchResponse<T>> {
-    return jsonFetch<T>(
+  async post(path, body) {
+    return jsonFetch(
       this.build(new URL(`${this.baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`), {
         method: 'POST',
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -64,8 +50,8 @@ export class ServiceClient {
     );
   }
 
-  async put<T, B = unknown>(path: string, body?: B): Promise<FetchResponse<T>> {
-    return jsonFetch<T>(
+  async put(path, body) {
+    return jsonFetch(
       this.build(new URL(`${this.baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`), {
         method: 'PUT',
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -73,8 +59,8 @@ export class ServiceClient {
     );
   }
 
-  async patch<T, B = unknown>(path: string, body?: B): Promise<FetchResponse<T>> {
-    return jsonFetch<T>(
+  async patch(path, body) {
+    return jsonFetch(
       this.build(new URL(`${this.baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`), {
         method: 'PATCH',
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -82,11 +68,11 @@ export class ServiceClient {
     );
   }
 
-  async delete<T>(path: string): Promise<FetchResponse<T>> {
-    return jsonFetch<T>(this.build(new URL(`${this.baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`), { method: 'DELETE' }));
+  async delete(path) {
+    return jsonFetch(this.build(new URL(`${this.baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`), { method: 'DELETE' }));
   }
 
-  private build(url: URL, init: RequestInit): Request {
+  build(url, init) {
     let request = new Request(url.toString(), init);
 
     if (this.auth?.tipo === 'bearer') {

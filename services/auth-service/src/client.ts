@@ -1,6 +1,6 @@
 import { ServiceClient } from '@restaurante/contract/http';
-import type { UsuarioPublico, AuthSession, MeResult } from '@restaurante/contract';
-import type { GuestResult } from './types.js';
+import type { UsuarioPublico, AuthSession } from '@restaurante/contract';
+import type { GuestResult, MeResult } from './types.js';
 
 export type AuthClientProps = {
   baseUrl: string;
@@ -16,25 +16,25 @@ export class AuthClient {
   constructor(private readonly client: ServiceClient) {}
 
   async guest(): Promise<GuestResult> {
-    const res = await this.client.post<GuestResult>('/api/auth/guest');
+    const res = await this.client.post<GuestResult & { error?: string }>('/api/auth/guest');
     if (!res.ok) throw new Error((res.body?.error as string) || 'guest falló');
     return res.body as GuestResult;
   }
 
   async login(email: string, password: string): Promise<AuthSession> {
-    const res = await this.client.post<AuthSession>('/api/auth/login', { email, password });
+    const res = await this.client.post<AuthSession & { error?: string }>('/api/auth/login', { email, password });
     if (!res.ok) throw new Error((res.body?.error as string) || 'login falló');
     return res.body as AuthSession;
   }
 
   async register(nombre: string, email: string, password: string): Promise<UsuarioPublico> {
-    const res = await this.client.post<{ usuario: UsuarioPublico }>('/api/auth/register', { nombre, email, password });
+    const res = await this.client.post<{ usuario: UsuarioPublico; error?: string }>('/api/auth/register', { nombre, email, password });
     if (!res.ok) throw new Error((res.body?.error as string) || 'register falló');
-    return res.body.usuario;
+    return res.body!.usuario;
   }
 
   async me(): Promise<MeResult> {
-    const res = await this.client.get<MeResult>('/api/auth/me');
+    const res = await this.client.get<MeResult & { error?: string }>('/api/auth/me');
     if (!res.ok) throw new Error((res.body?.error as string) || 'me falló');
     return res.body!;
   }
